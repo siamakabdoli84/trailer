@@ -260,7 +260,7 @@ function today(){var n=new Date(),j=toJ(n.getFullYear(),n.getMonth()+1,n.getDate
 function monthLabel(k){var p=parts(k);return MONTHS[p[1]-1]+' '+fa(p[0])}
 function dayLabel(s){var p=parts(s);return p[2]?fa(p[2])+' '+MONTHS[p[1]-1]:'ماهانه'}
 
-var COL={work:'works',exp:'expenses',rec:'receipts',claim:'works',adv:'advances'};
+var COL={work:'works',exp:'expenses',rec:'receipts',claim:'claims',adv:'advances'};
 var SAMPLE_CO=['شرکت آرمان بار','کارخانه سیمان نمونه','گروه صنعتی نمونه'];
 var COLORS=['c1','c2','c3','c4','c5','c6'];
 var DEFCATS=['لاستیک','تعمیرات','سوخت','عوارض و پارکینگ','حقوق راننده','بیمه و مالیات','سایر'];
@@ -279,6 +279,8 @@ function norm(o){
   if(!o||!Array.isArray(o.vehicles))return o;
   if(!Array.isArray(o.partners)||o.partners.length<2)o.partners=['خودم','احسان'];
   if(!Array.isArray(o.advances))o.advances=[];
+  if(!Array.isArray(o.claims))o.claims=[];
+  if(Array.isArray(o.works)){var kw=[];o.works.forEach(function(w){if(w.src==='claim'){delete w.src;o.claims.push(w)}else kw.push(w)});o.works=kw}
   o.vehicles.forEach(function(v,i){
     if(!Array.isArray(v.dongs))v.dongs=[3,3];
     if(!v.pay||typeof v.pay!=='object')v.pay=i===0?{pct:25,fix:5000000}:i===1?{pct:30,fix:0}:{pct:0,fix:0};
@@ -322,7 +324,7 @@ function seed(){
 }
 
 var S=load()||norm(seed());
-var ui={tab:'report',vf:'all',per:'all',cat:'all'};
+var ui={tab:'report',vf:'all',per:key(today().y,today().m,1).slice(0,7),cat:'all'};
 var sheet=null;
 function save(){persist()}
 
@@ -340,7 +342,7 @@ function months(){
   S.works.concat(S.expenses,S.receipts).forEach(function(r){s[r.date.slice(0,7)]=1});
   return Object.keys(s).sort().reverse();
 }
-function hasRecords(id){return S.works.concat(S.expenses,S.receipts,S.advances).some(function(r){return r.vid===id})}
+function hasRecords(id){return S.works.concat(S.expenses,S.receipts,S.advances,S.claims).some(function(r){return r.vid===id})}
 
 /* ---------- shell ---------- */
 var TABS=[
@@ -356,8 +358,8 @@ function segBtn(id,label,c){
 }
 function header(){
   var f=ui.tab!=='veh',ms=months();
-  if(ui.per!=='all'&&ms.indexOf(ui.per)<0)ui.per='all';
-  var sel=f?'<select id="per" class="per" aria-label="بازه زمانی"><option value="all">همه زمان‌ها</option>'+ms.map(function(k){return'<option value="'+k+'"'+(ui.per===k?' selected':'')+'>'+monthLabel(k)+'</option>'}).join('')+'</select>':'';
+  if(ms.indexOf(ui.per)<0)ui.per=key(today().y,today().m,1).slice(0,7);
+  var sel=(f&&ui.tab!=='claim')?'<select id="per" class="per" aria-label="ماه">'+ms.map(function(k){return'<option value="'+k+'"'+(ui.per===k?' selected':'')+'>'+monthLabel(k)+'</option>'}).join('')+'</select>':'';
   var segs=f?'<div class="seg" role="group" aria-label="تریلی">'+segBtn('all','همه تریلی‌ها')+S.vehicles.map(function(v){return segBtn(v.id,esc(v.name),cc(v.color))}).join('')+'</div>':'';
   return'<header class="top"><div class="wrap"><div class="top1"><h1><img class="logo" src="'+IMG.logo+'" alt="">دفتر تریلی‌ها</h1>'+sel+'</div>'+segs+'</div></header>';
 }
@@ -384,28 +386,21 @@ function render(){
 
 /* ---------- report ---------- */
 function tbl(first,rows){
-  var th=['کارکرد','هزینه','سود','دریافتی','طلب'];
+  var th=['کارکرد','هزینه','سود'];
   return'<div class="tw"><table><thead><tr><th>'+first+' <small>(تومان)</small></th>'+th.map(function(x){return'<th>'+x+'</th>'}).join('')+'</tr></thead><tbody>'+
     rows.map(function(r){
       var p=r.w-r.e,d=r.w-r.r;
       var o={vid:r.vid,per:r.per};
-      return'<tr'+(r.total?' class="tt"':'')+'><th scope="row">'+r.label+'</th><td>'+nb(money(r.w),'w',o)+'</td><td>'+nb(money(r.e),'e',o)+'</td><td class="'+(p<0?'bad':'')+'">'+nb(money(p),'p',o)+'</td><td>'+nb(money(r.r),'r',o)+'</td><td class="'+(d>0?'due':'')+'">'+nb(money(d),'d',o)+'</td></tr>';
+      return'<tr'+(r.total?' class="tt"':'')+'><th scope="row">'+r.label+'</th><td>'+nb(money(r.w),'w',o)+'</td><td>'+nb(money(r.e),'e',o)+'</td><td class="'+(p<0?'bad':'')+'">'+nb(money(p),'p',o)+'</td></tr>';
     }).join('')+'</tbody></table></div>';
 }
 function pReport(){
   var W=scope(S.works),E=scope(S.expenses),R=scope(S.receipts);
   var w=sum(W),e=sum(E),r=sum(R),profit=w-e,due=w-r,cash=r-e;
-  var pct=w>0?Math.max(0,Math.min(100,r/w*100)):0;
   var h='<section class="card" aria-label="خلاصه">'+
     '<div class="ln"><span>کارکرد</span><b>'+nb(mt(w),'w')+'</b></div>'+
     '<div class="ln"><span>منهای هزینه‌ها</span><b>'+nb(mt(e),'e')+'</b></div>'+
-    '<div class="ln tot"><span>سود</span><b class="'+(profit<0?'bad':'good')+'">'+nb(mt(profit),'p')+'</b></div>'+
-    '<div class="split">'+
-      '<div><span>سود دریافت‌شده</span><b class="'+(cash<0?'bad':'')+'">'+nb(mt(cash),'c')+'</b><em>دریافتی − هزینه</em></div>'+
-      '<div><span>سود دریافت‌نشده</span><b class="duec">'+nb(mt(due),'d')+'</b><em>کارکرد − دریافتی</em></div>'+
-    '</div>'+
-    '<div class="meter" role="img" aria-label="'+fa(Math.round(pct))+' درصد کارکرد دریافت شده"><i style="width:'+pct+'%"></i></div>'+
-    '<p class="cap">'+fa(Math.round(pct))+'٪ از کارکرد دریافت شده، یعنی '+nb(mt(r),'r')+'</p></section>';
+    '<div class="ln tot"><span>سود</span><b class="'+(profit<0?'bad':'good')+'">'+nb(mt(profit),'p')+'</b></div></section>';
   h+=dongCard()+driverCard();
 
   if(ui.vf==='all'){
@@ -435,14 +430,9 @@ function pReport(){
       return'<div class="bar"><span>'+esc(c[0])+'</span><span class="v">'+nb(money(c[1]),'e',{ct:c[0]})+' <small>'+fa(Math.round(c[1]/e*100))+'٪</small></span><span class="tr"><i style="width:'+(c[1]/mx*100)+'%"></i></span></div>';
     }).join('')+'</section>';
   }
-  var co={};
-  W.forEach(function(x){var o=co[x.company]||(co[x.company]={w:0,r:0});o.w+=x.amount});
-  R.forEach(function(x){var o=co[x.company]||(co[x.company]={w:0,r:0});o.r+=x.amount});
-  var cr=Object.keys(co).map(function(n){return{n:n,w:co[n].w,r:co[n].r,d:co[n].w-co[n].r}}).sort(function(a,b){return b.d-a.d});
+  var cr=claimRows();
   if(cr.length){
-    h+='<section class="card"><h2>طلب از شرکت‌ها</h2>'+cr.map(function(c){
-      return companyRow(c);
-    }).join('')+'</section>';
+    h+='<section class="card"><h2>طلب از شرکت‌ها</h2><p class="muted" style="margin:0 0 6px">مستقل از ماه؛ کل طلب‌های باقی‌مانده</p>'+cr.map(companyRow).join('')+'</section>';
   }
   return h;
 }
@@ -590,7 +580,7 @@ function amtHint(){
 function openSheet(type,id,vid){
   var rec=id?S[COL[type]].filter(function(x){return x.id===id})[0]:null;
   sheet={type:type,id:id||null,vid:vid||'',kind:(rec&&rec.date.slice(-2)==='00')?'monthly':'daily'};
-  var body=type==='work'?fWork(rec):type==='adv'?fAdv(rec):type==='exp'?fExp(rec):type==='claim'?fClaim():fRec(rec);
+  var body=type==='work'?fWork(rec):type==='adv'?fAdv(rec):type==='claim'?fClaim(rec):type==='exp'?fExp(rec):fRec(rec);
   $('#sheetRoot').innerHTML='<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true">'+body+'</div></div>';
   amtHint();
 }
@@ -620,7 +610,6 @@ function saveSheet(){
     if(!date)return err('تاریخ درست نیست.');
     rec.company=$('#company').value.trim();
     if(!rec.company)return err('بنویس طلب از کجا است.');
-    rec.src='claim';
     if(!rec.desc)rec.desc='طلب ثبت‌شده';
   }else{
     date=readDate('rd',false);
@@ -636,7 +625,7 @@ function saveSheet(){
 }
 
 /* ---------- editable numbers (adjustments) + claims ---------- */
-var MN={w:'کارکرد',e:'هزینه‌ها',r:'دریافتی',p:'سود',c:'سود دریافت‌شده',d:'سود دریافت‌نشده (طلب)'};
+var MN={cl:'طلب',w:'کارکرد',e:'هزینه‌ها',r:'دریافتی',p:'سود',c:'سود دریافت‌شده',d:'سود دریافت‌نشده (طلب)'};
 var ADJ_CO='تعدیل (بدون شرکت)',ADJ_CAT='تعدیل';
 var snum=function(s){var t=en(s),neg=/^\s*[-−–]/.test(t),n=num(t);return neg?-n:n};
 function nb(html,m,o){
@@ -650,7 +639,7 @@ function calcCtx(c){
     return(!c.vid||x.vid===c.vid)&&(c.per==='all'||x.date.slice(0,7)===c.per)&&(!co||c.co===undefined||x.company===c.co)&&(!ct||c.ct===undefined||x.cat===c.ct);
   })};
   var w=sum(f(S.works,1,0)),e=sum(f(S.expenses,0,1)),r=sum(f(S.receipts,1,0));
-  return{w:w,e:e,r:r,p:w-e,c:r-e,d:w-r};
+  return{w:w,e:e,r:r,p:w-e,c:r-e,d:w-r,cl:sum(f(S.claims,1,0))-r};
 }
 function adjDate(c){
   var t=today();
@@ -659,7 +648,7 @@ function adjDate(c){
 }
 function openAdjust(c){
   var cur=calcCtx(c)[c.m];
-  var ch={p:[['w','کارکرد'],['e','هزینه']],c:[['r','دریافتی'],['e','هزینه']],d:[['w','کارکرد'],['r','دریافتی']]}[c.m];
+  var ch={p:[['w','کارکرد'],['e','هزینه']],c:[['r','دریافتی'],['e','هزینه']],d:[['w','کارکرد'],['r','دریافتی']],cl:[['cl','طلب'],['r','دریافتی']]}[c.m];
   sheet={type:'adj',id:null,ctx:c,cur:cur,target:ch?ch[0][0]:c.m};
   var tx=[c.vid?V(c.vid).name:'همه تریلی‌ها',c.per==='all'?'همه زمان‌ها':monthLabel(c.per)];
   if(c.co!==undefined)tx.push(c.co||'بدون نام');
@@ -690,6 +679,7 @@ function saveAdjust(){
   var tg=sheet.target,coll,amt=diff;
   if(c.m==='p'){if(tg==='w')coll='works';else{coll='expenses';amt=-diff}}
   else if(c.m==='c'){if(tg==='r')coll='receipts';else{coll='expenses';amt=-diff}}
+  else if(c.m==='cl'){if(tg==='cl')coll='claims';else{coll='receipts';amt=-diff}}
   else if(c.m==='d'){if(tg==='w')coll='works';else{coll='receipts';amt=-diff}}
   else coll={w:'works',e:'expenses',r:'receipts'}[c.m];
   var rec={id:uid(),src:'adj',vid:c.vid||$('#vid').value,date:adjDate(c),amount:amt,desc:'تعدیل به عدد واقعی'};
@@ -698,28 +688,34 @@ function saveAdjust(){
   S[coll].push(rec);
   save();closeSheet();render();toast('تعدیل ثبت شد');
 }
-function fClaim(){
-  return'<h2>ثبت طلب</h2><p class="muted">طلب را از هر شرکتی که داری بنویس. این مبلغ به عنوان کارکرد همان تاریخ حساب می‌شود و در سود هم می‌آید.</p>'+
-    fld('تریلی',vsel('vid',null),'vid')+
-    dfld('تاریخ','cd',startDate(null),false)+
-    fld('طلب از (شرکت)','<input id="company" autocomplete="off" value="">','company',picks('company',companies(),''))+
-    amountField(null)+
-    fld('توضیح','<input id="desc" autocomplete="off" value="" placeholder="مثلاً مانده حساب قبلی">','desc')+
-    tail(null);
+function fClaim(r){
+  return'<h2>'+(r?'ویرایش طلب':'ثبت طلب')+'</h2><p class="muted">طلب را از هر شرکتی که داری بنویس. این مبلغ جزو کارکرد و سود ماه نیست. هر دریافتی از همان شرکت از آن کم می‌شود.</p>'+
+    fld('تریلی',vsel('vid',r&&r.vid),'vid')+
+    dfld('تاریخ','cd',startDate(r),false)+
+    fld('طلب از (شرکت)','<input id="company" autocomplete="off" value="'+esc(r?r.company:'')+'">','company',picks('company',companies(),r&&r.company))+
+    amountField(r)+
+    fld('توضیح','<input id="desc" autocomplete="off" value="'+esc(r?r.desc:'')+'" placeholder="مثلاً مانده حساب قبلی">','desc')+
+    tail(r);
+}
+function claimRows(){
+  var C=S.claims.filter(inV),R=S.receipts.filter(inV),co={};
+  C.forEach(function(x){var o=co[x.company]||(co[x.company]={w:0,r:0});o.w+=x.amount});
+  R.forEach(function(x){var o=co[x.company]||(co[x.company]={w:0,r:0});o.r+=x.amount});
+  return Object.keys(co).map(function(n){return{n:n,w:co[n].w,r:co[n].r,d:co[n].w-co[n].r}}).filter(function(c){return c.w||c.d}).sort(function(a,b){return b.d-a.d});
 }
 function companyRow(c){
-  var o={co:c.n};
-  return'<div class="co"><div><b>'+esc(c.n||'بدون نام')+'</b><small>کارکرد '+nb(money(c.w),'w',o)+' · دریافتی '+nb(money(c.r),'r',o)+'</small></div><span class="amt '+(c.d>0?'duec':'')+'">'+nb(money(c.d),'d',o)+'</span></div>';
+  var o={co:c.n,per:'all'};
+  return'<div class="co"><div><b>'+esc(c.n||'بدون نام')+'</b><small>طلب ثبت‌شده '+money(c.w)+' · دریافتی '+money(c.r)+'</small></div><span class="amt '+(c.d>0?'duec':'')+'">'+nb(money(c.d),'cl',o)+'</span></div>';
+}
+function claimItem(r){
+  return'<button class="item" data-act="edit" data-t="claim" data-id="'+r.id+'"><div class="l1"><b>'+esc(r.company||'بدون نام')+'</b><span class="amt">'+money(r.amount)+'</span></div><div class="l2">'+chip(r.vid)+tagx(r)+'<span>'+dayLabel(r.date)+'</span>'+(r.desc?'<span>'+esc(r.desc)+'</span>':'')+'</div></button>';
 }
 function pClaim(){
-  var W=scope(S.works),R=scope(S.receipts),co={};
-  W.forEach(function(x){var o=co[x.company]||(co[x.company]={w:0,r:0});o.w+=x.amount});
-  R.forEach(function(x){var o=co[x.company]||(co[x.company]={w:0,r:0});o.r+=x.amount});
-  var cr=Object.keys(co).map(function(n){return{n:n,w:co[n].w,r:co[n].r,d:co[n].w-co[n].r}}).sort(function(a,b){return b.d-a.d});
-  var d=sum(W)-sum(R);
-  return'<div class="card sum"><span>جمع طلب‌ها</span><b class="duec">'+nb(mt(d),'d')+'</b></div>'+
-    '<section class="card"><h2>طلب از کجا، چقدر</h2>'+(cr.length?cr.map(companyRow).join(''):'<p class="empty">هنوز طلبی نیست.<br>با دکمه «+» اولین طلب را ثبت کن.</p>')+
-    '<p class="muted" style="margin:10px 0 0">روی هر عدد بزن تا عدد واقعی را بنویسی. اختلاف به صورت «تعدیل» ثبت می‌شود و در لیست‌ها قابل ویرایش و حذف است.</p></section>';
+  var cr=claimRows(),C=S.claims.filter(inV),d=sum(C)-sum(S.receipts.filter(inV));
+  return'<div class="card sum"><span>جمع طلب‌ها</span><b class="duec">'+nb(mt(d),'cl',{per:'all'})+'</b></div>'+
+    '<section class="card"><h2>طلب از کجا، چقدر</h2><p class="muted" style="margin:0 0 6px">طلب ثبت‌شده منهای دریافتی‌های همان شرکت. به ماه و کارکرد ربطی ندارد.</p>'+(cr.length?cr.map(companyRow).join(''):'<p class="empty">هنوز طلبی نیست.<br>با دکمه «+» اولین طلب را ثبت کن.</p>')+
+    '<p class="muted" style="margin:10px 0 0">روی هر عدد بزن تا عدد واقعی را بنویسی. اختلاف به صورت «تعدیل» ثبت می‌شود.</p></section>'+
+    (C.length?'<section class="card"><h2>طلب‌های ثبت‌شده</h2>'+C.slice().sort(byDate).map(claimItem).join('')+'</section>':'');
 }
 
 /* ---------- partners: dong shares ---------- */
@@ -782,10 +778,10 @@ function dongCard(){
     });
     if(Math.abs(tot-6)>1e-9)warn=true;
   });
-  var th=['دانگ','سهم سود','سود دریافت‌شده','سود دریافت‌نشده'];
+  var th=['دانگ','سهم سود'];
   return'<section class="card"><h2>سهم شرکا</h2><p class="muted">سود هر دانگ از ۶ دانگ: '+per.join(' · ')+'</p>'+
     '<div class="tw"><table><thead><tr><th>شریک <small>(تومان)</small></th>'+th.map(function(x){return'<th>'+x+'</th>'}).join('')+'</tr></thead><tbody>'+
-    S.partners.map(function(n,i){var x=res[i];return'<tr><th scope="row">'+esc(n)+'</th><td>'+fa(+x.d.toFixed(2))+'</td><td>'+money(x.p)+'</td><td>'+money(x.c)+'</td><td>'+money(x.u)+'</td></tr>'}).join('')+
+    S.partners.map(function(n,i){var x=res[i];return'<tr><th scope="row">'+esc(n)+'</th><td>'+fa(+x.d.toFixed(2))+'</td><td>'+money(x.p)+'</td></tr>'}).join('')+
     '</tbody></table></div>'+
     (warn?'<p class="muted" style="margin:8px 0 0;color:var(--bad)">جمع دانگ‌های یکی از تریلی‌ها ۶ نیست. در بخش «خودروها» اصلاح کن.</p>':'')+'</section>';
 }
@@ -812,6 +808,7 @@ function tsv(){
   S.works.forEach(function(r){rows.push(['کارکرد',d(r.date),V(r.vid).name,r.company,r.desc,r.amount,''])});
   S.expenses.forEach(function(r){rows.push(['هزینه',d(r.date),V(r.vid).name,r.cat,r.desc,r.amount,r.payer])});
   S.receipts.forEach(function(r){rows.push(['دریافتی',d(r.date),V(r.vid).name,r.company,r.desc,r.amount,''])});
+  S.claims.forEach(function(r){rows.push(['طلب',d(r.date),V(r.vid).name,r.company,r.desc,r.amount,''])});
   S.advances.forEach(function(r){rows.push(['مساعده',d(r.date),V(r.vid).name,'',r.desc,r.amount,''])});
   return rows.map(function(r){return r.map(function(c){return String(c==null?'':c).replace(/[\t\n]/g,' ')}).join('\t')}).join('\n');
 }
@@ -865,7 +862,7 @@ document.addEventListener('click',function(e){
       save();render();toast('حقوق در هزینه‌ها ثبت شد');break;}
     case 'clear':
       if(!armed(b,'دوباره بزن تا نمونه‌ها پاک شود'))return;
-      S={sample:false,partners:S.partners,vehicles:S.vehicles.map(function(x){return{id:x.id,name:x.name,color:x.color,dongs:x.dongs,pay:x.pay,fields:x.fields.map(function(f){return{k:f.k,v:''}})}}),works:[],expenses:[],receipts:[],advances:[]};
+      S={sample:false,partners:S.partners,vehicles:S.vehicles.map(function(x){return{id:x.id,name:x.name,color:x.color,dongs:x.dongs,pay:x.pay,fields:x.fields.map(function(f){return{k:f.k,v:''}})}}),works:[],expenses:[],receipts:[],advances:[],claims:[]};
       save();render();toast('نمونه‌ها پاک شد');break;
     case 'copybk':copyText(JSON.stringify(S),'پشتیبان کپی شد');break;
     case 'copytsv':copyText(tsv(),'کپی شد؛ در اکسل یا Numbers بچسبان');break;
