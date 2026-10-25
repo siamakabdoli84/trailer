@@ -324,7 +324,7 @@ function seed(){
 }
 
 var S=load()||norm(seed());
-var ui={tab:'report',vf:'all',per:key(today().y,today().m,1).slice(0,7),cat:'all'};
+var ui={tab:'report',vf:'all',per:key(today().y,today().m,1).slice(0,7),pk:'',cat:'all'};
 var sheet=null;
 function save(){persist()}
 
@@ -334,7 +334,29 @@ var V=function(id){return S.vehicles.filter(function(v){return v.id===id})[0]||{
 var chip=function(id){var v=V(id);return'<span class="chip" style="--c:var(--'+cc(v.color)+')">'+esc(v.name)+'</span>'};
 var tagx=function(r){return r.src==='claim'?'<span class="tag">طلب ثبت‌شده</span>':r.src==='adj'?'<span class="tag">تعدیل</span>':''};
 var inV=function(r){return ui.vf==='all'||r.vid===ui.vf};
-var inP=function(r){return ui.per==='all'||r.date.slice(0,7)===ui.per};
+function inPer(d,per){
+  if(per==='all')return true;
+  if(per.indexOf('..')>0){
+    var ab=per.split('..'),a=ab[0],b=ab[1];
+    if(d.slice(-2)==='00')return d.slice(0,7)>=a.slice(0,7)&&d.slice(0,7)<=b.slice(0,7);
+    return d>=a&&d<=b;
+  }
+  return d.slice(0,7)===per;
+}
+var isMonth=function(per){return per.length===7};
+function perLabel(per){
+  if(per==='all')return'همه زمان‌ها';
+  if(isMonth(per))return monthLabel(per);
+  var ab=per.split('..'),f=function(x){var p=parts(x);return fa(p[0])+'/'+fa(pad(p[1]))+'/'+fa(pad(p[2]))};
+  return'از '+f(ab[0])+' تا '+f(ab[1]);
+}
+function presetRange(k){
+  var t=today(),y=t.y,m=t.m;
+  if(k==='py')return key(t.y,1,1)+'..'+key(t.y,12,dim(t.y,12));
+  var n=k==='p6'?5:2;m-=n;while(m<1){m+=12;y--}
+  return key(y,m,1)+'..'+key(t.y,t.m,dim(t.y,t.m));
+}
+var inP=function(r){return inPer(r.date,ui.per)};
 var scope=function(a){return a.filter(function(r){return inV(r)&&inP(r)})};
 var byDate=function(a,b){return b.date<a.date?-1:b.date>a.date?1:0};
 function months(){
@@ -358,8 +380,11 @@ function segBtn(id,label,c){
 }
 function header(){
   var f=ui.tab!=='veh',ms=months();
-  if(ms.indexOf(ui.per)<0)ui.per=key(today().y,today().m,1).slice(0,7);
-  var sel=(f&&ui.tab!=='claim')?'<select id="per" class="per" aria-label="ماه">'+ms.map(function(k){return'<option value="'+k+'"'+(ui.per===k?' selected':'')+'>'+monthLabel(k)+'</option>'}).join('')+'</select>':'';
+  if(isMonth(ui.per)&&ms.indexOf(ui.per)<0)ui.per=key(today().y,today().m,1).slice(0,7);
+  var cur=ui.pk||ui.per;
+  var sel=(f&&ui.tab!=='claim')?'<select id="per" class="per" aria-label="بازه زمانی">'+ms.map(function(k){return'<option value="'+k+'"'+(cur===k?' selected':'')+'>'+monthLabel(k)+'</option>'}).join('')+
+    [['all','همه زمان‌ها'],['p3','۳ ماه اخیر'],['p6','۶ ماه اخیر'],['py','امسال']].map(function(o){return'<option value="'+o[0]+'"'+(cur===o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+
+    '<option value="custom"'+(cur==='custom'?' selected':'')+'>'+(ui.pk==='custom'?perLabel(ui.per):'بازه دلخواه…')+'</option></select>':'';
   var segs=f?'<div class="seg" role="group" aria-label="تریلی">'+segBtn('all','همه تریلی‌ها')+S.vehicles.map(function(v){return segBtn(v.id,esc(v.name),cc(v.color))}).join('')+'</div>':'';
   return'<header class="top"><div class="wrap"><div class="top1"><h1><img class="logo" src="'+IMG.logo+'" alt="">دفتر تریلی‌ها</h1>'+sel+'</div>'+segs+'</div></header>';
 }
@@ -411,7 +436,7 @@ function pReport(){
     rows.push({label:'جمع',vid:'',per:ui.per,w:w,e:e,r:r,total:true});
     h+='<section class="card"><h2>به تفکیک تریلی</h2>'+tbl('تریلی',rows)+'</section>';
   }
-  if(ui.per==='all'){
+  if(!isMonth(ui.per)){
     var all=W.concat(E,R);
     var ms=months().filter(function(k){return all.some(function(x){return x.date.slice(0,7)===k})});
     if(ms.length){
@@ -422,12 +447,21 @@ function pReport(){
       h+='<section class="card"><h2>به تفکیک ماه</h2>'+tbl('ماه',mr)+'</section>';
     }
   }
-  var cats={};E.forEach(function(x){cats[x.cat]=(cats[x.cat]||0)+x.amount});
+  var e1=sum(E.filter(function(x){return x.cat===DRV_CAT})),e2=e-e1;
+  var advS=sum(S.advances.filter(function(x){return inV(x)&&inP(x)}));
+  var pc=function(x){return w>0?Math.max(0,Math.min(100,Math.abs(x)/w*100)):0};
+  var cmp=function(lb,val,cls,note){return'<div class="bar"><span>'+lb+'</span><span class="v">'+money(val)+(w>0?' <small>'+fa(Math.round(val/w*100))+'٪ از درآمد</small>':'')+'</span><span class="tr"><i style="width:'+pc(val)+'%"></i></span>'+(note?'<small class="muted">'+note+'</small>':'')+'</div>'};
+  h+='<section class="card"><h2>مقایسه درآمد و هزینه</h2>'+
+    cmp('درآمد (کارکرد)',w)+
+    cmp('حقوق راننده',e1,'','مساعده‌های داده‌شده: '+money(advS)+' (بخشی از همین حقوق)')+
+    cmp('سایر هزینه‌ها',e2)+
+    cmp('سود',profit)+'</section>';
+  var cats={};E.forEach(function(x){if(x.cat!==DRV_CAT)cats[x.cat]=(cats[x.cat]||0)+x.amount});
   var ce=Object.keys(cats).map(function(k){return[k,cats[k]]}).sort(function(a,b){return b[1]-a[1]});
   if(ce.length){
     var mx=ce[0][1];
-    h+='<section class="card"><h2>هزینه‌ها به تفکیک دسته</h2>'+ce.map(function(c){
-      return'<div class="bar"><span>'+esc(c[0])+'</span><span class="v">'+nb(money(c[1]),'e',{ct:c[0]})+' <small>'+fa(Math.round(c[1]/e*100))+'٪</small></span><span class="tr"><i style="width:'+(c[1]/mx*100)+'%"></i></span></div>';
+    h+='<section class="card"><h2>سایر هزینه‌ها به تفکیک دسته</h2>'+ce.map(function(c){
+      return'<div class="bar"><span>'+esc(c[0])+'</span><span class="v">'+nb(money(c[1]),'e',{ct:c[0]})+' <small>'+fa(Math.round(c[1]/e2*100))+'٪</small></span><span class="tr"><i style="width:'+(c[1]/mx*100)+'%"></i></span></div>';
     }).join('')+'</section>';
   }
   var cr=claimRows();
@@ -584,7 +618,16 @@ function openSheet(type,id,vid){
   $('#sheetRoot').innerHTML='<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true">'+body+'</div></div>';
   amtHint();
 }
-function closeSheet(){sheet=null;$('#sheetRoot').innerHTML=''}
+function closeSheet(){var wr=sheet&&sheet.type==='range';sheet=null;$('#sheetRoot').innerHTML='';if(wr)render()}
+function openRange(){
+  var t=today(),a=isMonth(ui.per)?key(parts(ui.per)[0],parts(ui.per)[1],1):(ui.per.indexOf('..')>0?ui.per.split('..')[0]:key(t.y,t.m,1));
+  var b=ui.per.indexOf('..')>0?ui.per.split('..')[1]:key(t.y,t.m,t.d);
+  sheet={type:'range',id:null};
+  $('#sheetRoot').innerHTML='<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true"><h2>بازه دلخواه</h2>'+
+    dfld('از تاریخ','rf',a,false)+dfld('تا تاریخ','rt',b,false)+
+    '<p class="muted">ثبت‌های «ماهانه (یکجا)» اگر ماهشان داخل بازه باشد حساب می‌شوند.</p><p class="err" id="err" role="alert"></p>'+
+    '<div class="acts"><button class="btn primary" data-act="saverange">نمایش</button><button class="btn ghost" data-act="close">انصراف</button></div></div></div>';
+}
 function saveSheet(){
   if(!sheet)return;
   var t=sheet.type,err=function(m){$('#err').textContent=m};
@@ -621,7 +664,9 @@ function saveSheet(){
   var list=S[COL[t]];
   if(sheet.id){var o=list.filter(function(x){return x.id===sheet.id})[0];Object.assign(o,rec)}
   else{rec.id=uid();list.push(rec)}
-  save();closeSheet();render();toast('ذخیره شد');
+  var moved=false;
+  if(!inPer(rec.date,ui.per)){ui.per=rec.date.slice(0,7);ui.pk='';moved=true}
+  save();closeSheet();render();toast(moved?'ذخیره شد؛ نمایش به '+monthLabel(ui.per)+' رفت':'ذخیره شد');
 }
 
 /* ---------- editable numbers (adjustments) + claims ---------- */
@@ -636,21 +681,21 @@ function nb(html,m,o){
 }
 function calcCtx(c){
   var f=function(a,co,ct){return a.filter(function(x){
-    return(!c.vid||x.vid===c.vid)&&(c.per==='all'||x.date.slice(0,7)===c.per)&&(!co||c.co===undefined||x.company===c.co)&&(!ct||c.ct===undefined||x.cat===c.ct);
+    return(!c.vid||x.vid===c.vid)&&inPer(x.date,c.per)&&(!co||c.co===undefined||x.company===c.co)&&(!ct||c.ct===undefined||x.cat===c.ct);
   })};
   var w=sum(f(S.works,1,0)),e=sum(f(S.expenses,0,1)),r=sum(f(S.receipts,1,0));
   return{w:w,e:e,r:r,p:w-e,c:r-e,d:w-r,cl:sum(f(S.claims,1,0))-r};
 }
 function adjDate(c){
   var t=today();
-  if(c.per!=='all'){var p=parts(c.per);return key(p[0],p[1],0)}
+  if(c.per!=='all'){var p=parts(c.per.indexOf('..')>0?c.per.split('..')[1]:c.per);return key(p[0],p[1],0)}
   return key(t.y,t.m,t.d);
 }
 function openAdjust(c){
   var cur=calcCtx(c)[c.m];
   var ch={p:[['w','کارکرد'],['e','هزینه']],c:[['r','دریافتی'],['e','هزینه']],d:[['w','کارکرد'],['r','دریافتی']],cl:[['cl','طلب'],['r','دریافتی']]}[c.m];
   sheet={type:'adj',id:null,ctx:c,cur:cur,target:ch?ch[0][0]:c.m};
-  var tx=[c.vid?V(c.vid).name:'همه تریلی‌ها',c.per==='all'?'همه زمان‌ها':monthLabel(c.per)];
+  var tx=[c.vid?V(c.vid).name:'همه تریلی‌ها',perLabel(c.per)];
   if(c.co!==undefined)tx.push(c.co||'بدون نام');
   if(c.ct!==undefined)tx.push(c.ct);
   var body='<h2>ویرایش عدد: '+MN[c.m]+'</h2><p class="muted">'+tx.map(function(x){return esc(x)}).join(' · ')+'</p>'+
@@ -725,11 +770,15 @@ function payBlock(v){
     '<label><span>درصد از کارکرد</span><input inputmode="decimal" autocomplete="off" data-v="'+v.id+'" data-pay="pct" value="'+fa(p.pct||0)+'" aria-label="درصد حقوق راننده"></label>'+
     '<label><span>مبلغ ثابت ماهانه (تومان)</span><input inputmode="numeric" autocomplete="off" data-v="'+v.id+'" data-pay="fix" value="'+fa(p.fix||0)+'" aria-label="مبلغ ثابت ماهانه"></label></div>';
 }
+function monthsSpan(per){
+  var ab=per.split('..'),a=parts(ab[0]),b=parts(ab[1]);
+  return Math.max(1,(b[0]-a[0])*12+(b[1]-a[1])+1);
+}
 function driverCalc(v){
   var p=v.pay||{pct:0,fix:0};
   var ws=S.works.filter(function(x){return x.vid===v.id&&inP(x)}),w=sum(ws),ms={};
   ws.forEach(function(x){ms[x.date.slice(0,7)]=1});
-  var nm=ui.per!=='all'?1:Object.keys(ms).length;
+  var nm=isMonth(ui.per)?1:ui.per.indexOf('..')>0?monthsSpan(ui.per):Object.keys(ms).length;
   var sal=Math.round(w*(+p.pct||0)/100+(+p.fix||0)*nm);
   var ex=S.expenses.filter(function(x){return x.vid===v.id&&inP(x)});
   var rec=sum(ex.filter(function(x){return x.cat===DRV_CAT}));
@@ -743,20 +792,20 @@ function driverCard(){
   if(!vs.length)return'';
   return'<section class="card"><h2>حساب راننده</h2>'+vs.map(function(v){
     var c=driverCalc(v),p=v.pay;
-    var note=ui.per==='all'?'<p class="muted" style="margin:6px 0 0">برای ثبت حقوق در هزینه‌ها، بالای صفحه یک ماه را انتخاب کن.</p>':
+    var note=!isMonth(ui.per)?'<p class="muted" style="margin:6px 0 0">برای ثبت حقوق در هزینه‌ها، بالای صفحه یک ماه را انتخاب کن.</p>':
       c.gap>0?'<button class="btn" style="margin-top:8px" data-act="paysal" data-v="'+v.id+'">ثبت حقوق در هزینه‌ها ('+money(c.gap)+' تومان)</button>':
       '<p class="muted" style="margin:6px 0 0">'+(c.gap<0?'حقوق ثبت‌شده در هزینه‌ها از مبلغ محاسبه‌شده بیشتر است.':'حقوق در هزینه‌ها ثبت شده است.')+'</p>';
     return'<div style="--c:var(--'+cc(v.color)+');margin-top:10px">'+chip(v.id)+' <span class="muted">'+fa(p.pct||0)+'٪ کارکرد'+((+p.fix)?' + '+money(+p.fix)+' ثابت':'')+'</span>'+
       '<div class="ln"><span>کارکرد</span><b>'+money(c.w)+'</b></div>'+
       '<div class="ln"><span>حقوق محاسبه‌شده</span><b>'+money(c.sal)+'</b></div>'+
       '<div class="ln"><span>هزینه‌های پرداخت‌شده توسط راننده</span><b>+ '+money(c.re)+'</b></div>'+
-      '<div class="ln"><span>مساعده‌های داده‌شده</span><b>− '+money(c.adv)+'</b></div>'+
+      '<div class="ln"><span>مساعده‌های داده‌شده (بخشی از حقوق)</span><b>− '+money(c.adv)+'</b></div>'+
       '<div class="ln tot"><span>قابل پرداخت به راننده</span><b style="font-size:20px" class="'+(c.due<0?'bad':'')+'">'+mt(c.due)+'</b></div>'+
       (c.due<0?'<p class="muted" style="margin:0;color:var(--bad)">منفی یعنی راننده از مساعده بیشتر خرج نکرده و به شما بدهکار است.</p>':'')+
       c.ad.map(function(r){return'<button class="item" data-act="edit" data-t="adv" data-id="'+r.id+'"><div class="l1"><b>مساعده</b><span class="amt">'+money(r.amount)+'</span></div><div class="l2"><span>'+dayLabel(r.date)+'</span>'+(r.desc?'<span>'+esc(r.desc)+'</span>':'')+'</div></button>'}).join('')+
       '<button class="btn ghost" style="margin-top:8px" data-act="add" data-t="adv" data-v="'+v.id+'">+ مساعده</button>'+note+'</div>';
   }).join('')+
-  '<p class="muted" style="margin:12px 0 0">هزینه‌هایی که راننده خرج می‌کند فقط یک بار در هزینه‌ها حساب می‌شود. مساعده هزینه نیست و فقط از مبلغ قابل پرداخت کم می‌شود. سود فقط حقوقی را کم می‌کند که با دکمه بالا یا دستی در هزینه‌ها ثبت کنی.</p></section>';
+  '<p class="muted" style="margin:12px 0 0">هزینه‌هایی که راننده خرج می‌کند فقط یک بار در هزینه‌ها حساب می‌شود. مساعده بخشی از پرداخت حقوق است و هزینه جدا حساب نمی‌شود؛ فقط از مبلغ قابل پرداخت کم می‌شود. سود فقط حقوقی را کم می‌کند که با دکمه بالا یا دستی در هزینه‌ها ثبت کنی.</p></section>';
 }
 function dongBlock(v){
   return'<div class="dg"><span class="lb">سهم دانگ‌ها (جمع باید ۶ باشد)</span>'+S.partners.map(function(n,i){
@@ -854,9 +903,14 @@ document.addEventListener('click',function(e){
     case 'delv':
       if(!armed(b,'دوباره بزن تا حذف شود'))return;
       S.vehicles=S.vehicles.filter(function(x){return x.id!==b.dataset.v});save();render();break;
+    case 'saverange':{
+      var ra=readDate('rf',false),rb=readDate('rt',false);
+      if(!ra||!rb){$('#err').textContent='تاریخ درست نیست.';return}
+      if(ra>rb){$('#err').textContent='تاریخ شروع باید قبل از پایان باشد.';return}
+      ui.per=ra+'..'+rb;ui.pk='custom';closeSheet();render();break;}
     case 'paysal':{
       v=S.vehicles.filter(function(x){return x.id===b.dataset.v})[0];
-      if(!v||ui.per==='all')return;
+      if(!v||!isMonth(ui.per))return;
       var dc=driverCalc(v);if(dc.gap<=0)return;
       S.expenses.push({id:uid(),vid:v.id,date:ui.per+'-00',cat:DRV_CAT,desc:'حقوق راننده',amount:dc.gap,payer:'خودم'});
       save();render();toast('حقوق در هزینه‌ها ثبت شد');break;}
@@ -898,7 +952,14 @@ document.addEventListener('input',function(e){
     $$('[data-for="'+t.id+'"] button').forEach(function(x){x.setAttribute('aria-pressed',String(x.dataset.val===t.value))});
   }
 });
-document.addEventListener('change',function(e){if(e.target.id==='per'){ui.per=e.target.value;render()}});
+document.addEventListener('change',function(e){
+  if(e.target.id!=='per')return;
+  var v=e.target.value;
+  if(v==='custom'){openRange();return}
+  ui.pk='';
+  if(v==='p3'||v==='p6'||v==='py'){ui.pk=v;ui.per=presetRange(v)}else ui.per=v;
+  render();
+});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&sheet)closeSheet()});
 
 $('#app').innerHTML='<div id="shell"></div><div id="sheetRoot"></div><div id="toast" aria-live="polite"></div>';
